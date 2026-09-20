@@ -4,6 +4,10 @@ A QGIS toolbox that automatically symbolizes **Esri 10m Land Cover** rasters as 
 
 > Data produced by Impact Observatory for Esri (© 2021 Esri, CC BY 4.0). This toolbox is not officially affiliated with Esri or Impact Observatory. See [`NOTICE.md`](./NOTICE.md).
 
+
+https://github.com/user-attachments/assets/7b1e8c80-3e54-4709-8ab1-78ca7cc9a156
+
+
 ## Features
 
 - Polygonize → remove NoData → dissolve by class → fill attributes → automatic symbology
