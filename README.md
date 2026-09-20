@@ -1,11 +1,11 @@
 # Esri Land Cover Style — QGIS Toolbox
 
-A QGIS toolbox that automatically symbolizes **Esri 10m Land Cover** rasters as labeled, colored vector polygons. It supports **all versions**: the annual **2017–2025 (9 classes)** collection and the **Esri 2020 (10 classes)** map, each in both the GEE and the Original pixel-value scheme. The workflow mirrors the *MapBiomas ID Style Toolbox*.
+A QGIS toolbox that automatically symbolizes **Esri 10m Land Cover** rasters as labeled, colored vector polygons. It supports **all versions**: the annual **2017–2025 (9 classes)** collection and the **Esri 2020 (10 classes)** map, each in both the GEE and the Original pixel-value scheme. 
 
 > Data produced by Impact Observatory for Esri (© 2021 Esri, CC BY 4.0). This toolbox is not officially affiliated with Esri or Impact Observatory. See [`NOTICE.md`](./NOTICE.md).
 
 
-https://github.com/user-attachments/assets/7b1e8c80-3e54-4709-8ab1-78ca7cc9a156
+https://github.com/user-attachments/assets/9711dd43-0e88-4719-919b-fc37ef878931
 
 
 ## Features
@@ -17,6 +17,145 @@ https://github.com/user-attachments/assets/7b1e8c80-3e54-4709-8ab1-78ca7cc9a156
 - Dynamic legend — only classes present in the data are shown
 - Default output is GeoJSON (`.gpkg` / `.shp` also possible)
 - Quick-access **Esri Land Cover Style** button on the QGIS toolbar
+
+## Tool Architecture & Workflow
+
+### 1. Processing workflow
+
+```mermaid
+flowchart TD
+    A[/"Esri 10m Land Cover raster (GeoTIFF)"/] --> B["Select version and pixel-value scheme"]
+    B --> C["Step 1/6 - gdal:polygonize<br/>field = gridcode"]
+    C --> D["Step 2/6 - native:extractbyexpression<br/>gridcode NOT IN NoData values"]
+    D --> E["Step 3/6 - native:dissolve<br/>by gridcode, temporary GeoPackage"]
+    E --> F["Step 4-5/6 - add and fill fields<br/>class_en, hex_color, lulc_ver"]
+    F --> G{"Unknown gridcodes?"}
+    G -- yes --> H["Warning: check version and scheme"]
+    G -- no --> I
+    H --> I["Step 6/6 - native:savefeatures<br/>GeoJSON / GPKG / SHP"]
+    I --> J{"Load to canvas?"}
+    J -- yes --> K["Categorized symbology<br/>only classes present in the data"]
+    K --> L[/"Styled vector layer with dynamic legend"/]
+    J -- no --> M[/"Vector file saved"/]
+```
+
+### 2. Which scheme should I pick?
+
+```mermaid
+flowchart TD
+    S["Where does your raster come from?"] --> Q1{"Which product?"}
+    Q1 -- "Annual 2017-2025, 9 classes" --> Q2{"Pixel values present?"}
+    Q1 -- "Esri 2020, 10 classes" --> Q3{"Pixel values present?"}
+    Q2 -- "1 to 9" --> O0["Option 1: 2017-2025 Remapped 1-9"]
+    Q2 -- "1,2,4,5,7,8,9,10,11" --> O1["Option 2: 2017-2025 Original"]
+    Q3 -- "2 to 11, value 1 = No Data" --> O2["Option 3: 2020 GEE catalog"]
+    Q3 -- "1 to 10" --> O3["Option 4: 2020 Original"]
+```
+
+### 3. Components
+
+```mermaid
+flowchart LR
+    subgraph Repo["Repository"]
+        P["esri_landcover_style_qgis_toolbox.py"]
+        T["startup_esri_landcover.py"]
+        N["README.md / NOTICE.md / LICENSE"]
+    end
+    subgraph QGIS["QGIS"]
+        PT["Processing Toolbox"]
+        PR["Algorithm: esri_landcover_raster_to_vector"]
+        TB["Toolbar button: Esri Land Cover Style"]
+        PJ["Project canvas"]
+    end
+    P -- "Add Script to Toolbox" --> PT
+    PT --> PR
+    T -- "profile python/startup.py" --> TB
+    TB -- "execAlgorithmDialog" --> PR
+    PR -- "add layer and renderer" --> PJ
+```
+
+### 4. Code structure
+
+```mermaid
+classDiagram
+    class EsriLandCoverRasterToVectorAlgorithm {
+        +INPUT_RASTER
+        +BAND
+        +SCHEME
+        +OUTPUT_VECTOR
+        +LOAD_TO_CANVAS
+        +initAlgorithm()
+        +processAlgorithm()
+        +shortHelpString()
+    }
+    class GeoJsonVectorDestination {
+        +defaultFileExtension() str
+    }
+    class SCHEMES {
+        label
+        version
+        nodata
+        classes
+    }
+    class apply_symbology {
+        categorized renderer
+        only classes present in data
+    }
+    QgsProcessingAlgorithm <|-- EsriLandCoverRasterToVectorAlgorithm
+    QgsProcessingParameterVectorDestination <|-- GeoJsonVectorDestination
+    EsriLandCoverRasterToVectorAlgorithm ..> GeoJsonVectorDestination : output parameter
+    EsriLandCoverRasterToVectorAlgorithm ..> SCHEMES : lookup, nodata, labels
+    EsriLandCoverRasterToVectorAlgorithm ..> apply_symbology : when loading to canvas
+```
+
+### 5. Run sequence
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant D as Processing dialog
+    participant A as Algorithm
+    participant G as GDAL and native algorithms
+    participant C as QGIS canvas
+    U->>D: choose raster, band, version, output
+    D->>A: processAlgorithm(parameters)
+    A->>G: gdal:polygonize
+    G-->>A: polygons with gridcode
+    A->>G: extractbyexpression (remove NoData)
+    A->>G: dissolve by gridcode
+    A->>A: fill class_en, hex_color, lulc_ver
+    A->>G: savefeatures
+    G-->>A: output path
+    alt Load to canvas
+        A->>C: add layer with categorized renderer
+    end
+    A-->>U: result and warnings
+```
+
+### 6. Data model
+
+```mermaid
+erDiagram
+    SCHEME ||--|{ CLASS : defines
+    SCHEME ||--o{ OUTPUT_LAYER : "sets lulc_ver"
+    CLASS ||--o{ OUTPUT_LAYER : "fills class_en and hex_color"
+    SCHEME {
+        string label
+        string version
+        list nodata
+    }
+    CLASS {
+        int pixel_value
+        string class_name
+        string hex
+    }
+    OUTPUT_LAYER {
+        int gridcode
+        string class_en
+        string hex_color
+        string lulc_ver
+    }
+```
 
 ## File Structure
 
@@ -51,8 +190,8 @@ Esri-Landcover-style-QGIS-Toolbox/
 
 | Option | Use when | NoData removed |
 |---|---|---|
-| 2017–2025 (9 classes) — **Remapped 1–9** | Raster from the GEE community catalog `ESRI_Global-LULC_10m_TS` | 0 |
-| 2017–2025 (9 classes) — **Original 1,2,4,5,7,8,9,10,11** | Official GeoTIFF from Esri / Impact Observatory | 0 |
+| 2017–2025 (9 classes) — **Remapped 1–9** | Raster already remapped to 1–9, e.g. exported from GEE after applying `remap([1,2,4,5,7,8,9,10,11], [1,2,3,4,5,6,7,8,9])` | 0 |
+| 2017–2025 (9 classes) — **Original 1,2,4,5,7,8,9,10,11** | Official GeoTIFF from Esri / Impact Observatory, or the raw `ESRI_Global-LULC_10m_TS` asset exported without remapping | 0 |
 | 2020 (10 classes) — **GEE catalog (1–11)** | Raster from the GEE catalog `ESRI_Global-LULC_10m` (value 1 = No Data) | 0 and 1 |
 | 2020 (10 classes) — **Original 1–10** | Official Esri 2020 GeoTIFF | 0 |
 
@@ -60,7 +199,7 @@ Esri-Landcover-style-QGIS-Toolbox/
 
 ## Classes & Colors
 
-### 2017–2025, 9 classes — Remapped (GEE)
+### 2017–2025, 9 classes — Remapped 1–9
 | Pixel value | Land Cover Class | Hex | Color |
 |:---:|---|:---:|:---:|
 | 1 | Water | `#1A5BAB` | ![](https://img.shields.io/badge/■-1A5BAB?style=flat&color=1A5BAB) |
